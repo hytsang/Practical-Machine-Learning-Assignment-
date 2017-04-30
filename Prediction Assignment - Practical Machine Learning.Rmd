@@ -2,7 +2,9 @@
 title: "Prediction Assignment - Practical Machine Learning"
 author: "Howard Tsang"
 date: "April 25, 2017"
-output: html_document
+output:
+  html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -200,7 +202,7 @@ pre_rf <- predict(rf_fit, newdata = validating)
 confusionMatrix(data = pre_rf, validating$classe)
 ```
 
-The random forest fitted model predicted with 99.05% accuracy (with 95% confidence interval between 98.77% to 99.28%) in validation data set.  
+The random forest fitted model predicted with 99.05% accuracy (with 95% confidence interval between 98.77% to 99.28%) in validation data set. Accuracy = 1 - Out-Of-Bag Error, so Out-Of-Bag Error is less than 1%. 
  
 ```{r}
 Correctly_Predicted <- pre_rf == validating$classe
