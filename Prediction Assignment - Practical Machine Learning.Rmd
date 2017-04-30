@@ -1,0 +1,225 @@
+---
+title: "Prediction Assignment - Practical Machine Learning"
+author: "Howard Tsang"
+date: "April 25, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, I use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The goal of my model is to predict which ways they performed the exercise ("classes") using accelerometers data [1].
+
+
+##Data
+
+The sensor data consist data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. Our outcome variable is "classe", a factor variable with 5 levels. For this data set, ¡§participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in 5 different fashions". 
+
+Class A: exactly according to the specification
+Class B: throwing the elbows to the front
+Class C: lifting the dumbbell only halfway
+Class D: lowering the dumbbell only halfway
+Class E: throwing the hips to the front
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes.
+
+
+##Objectives
+
+Prediction evaluations will be based on maximizing the accuracy and minimizing the out-of-sample error. All available variables (other than "classe") will be used for prediction. Model bases on random forest algorithms will be fitted. 
+
+
+##Loading Data & Libraries
+
+###Loading required libraries for analysis
+
+```{r}
+set.seed(1636)
+suppressMessages(library(dplyr))
+suppressMessages(library(tidyr))
+suppressMessages(library(caret))
+suppressMessages(library(ggplot2))
+suppressMessages(library(randomForest))
+```
+
+###Loading data
+
+```{r}
+train_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+if (!file.exists("train_data.csv")){
+  download.file(train_url, destfile="train_data.csv")}
+if (!file.exists("test_data.csv")){
+  download.file(test_url, destfile="test_data.csv")}    
+```
+
+
+##Explore & Clean the Data
+
+###Data Preprocessing 1 - Replace missing values & excel division error strings "#DIV/0!" with "NA".
+
+Excel data cells have error strings "#DIV/0!" or blank value (missing data) are replaced with "NA". I Data structure is explored as below. 
+
+```{r}
+train_data <- read.csv("train_data.csv", na.strings=c("NA","#DIV/0!",""), header=TRUE)
+test_data <- read.csv("test_data.csv", na.strings=c("NA","#DIV/0!",""), header=TRUE)
+str(train_data)
+```
+
+###Data Preprocessing 2 - Cleaning variables with too many NAs (i.e. variables have "NA" higher than 97% threshold):
+
+Obviously, there are lot of variables with "NA" value.  We have to check if these variables have too many missing values that may not provide meaningful information for model fitting.  Percentage of missing values of each variables in training and testing data sets are calculated. 
+
+```{r}
+NA_Train <- sapply(train_data, function(df) {sum(is.na(df)==TRUE)/length(df)})
+NA_Test <- sapply(test_data, function(df) {sum(is.na(df)==TRUE)/length(df)})
+table(NA_Train > .97)
+table(NA_Test > .97)
+```
+
+The result indicates that 100 variables in both data sets have more that 97% missing values. Therefore we decide to remove these 100 variables from both the training and testing data set.
+
+```{r}
+colnames1 <- names(which(NA_Train < 0.97))
+train_datav2 <- train_data[, colnames1]
+colnames2 <- names(which(NA_Test < 0.97))
+test_datav2 <- test_data[, colnames2]
+```
+
+Double check if there are any "NA" missing value in training and testing data set.
+
+```{r}
+sum(is.na(train_datav2) == TRUE)
+sum(is.na(test_datav2) == TRUE)
+```
+
+###Data Preprocessing 3 -  Removing non-motion measurement data
+
+By observation, column 1 to column 7 (column 1 : X, column 2: user name, column 3: raw_timestamp_part_1, column 4: raw_timestamp_part_2, column 5: cvtd_timestamp, column 6: new_window, and column 7: num_windoware) are metadata variables that do not provide motion related information and may create noise in the prediction.   
+
+```{r}
+train_datav3 <- train_datav2[,-c(1:7)]
+test_datav3 <- test_datav2[,-c(1:7)]
+```
+
+
+###Data Preprocessing 4 - Remove ZeroVariance & NearZeroVariance variables
+
+We remove zero or near zero covariates predictors from both training and testing data sets.  Zero or near zero covariates predictors are constant and almost constant across samples and do not contribute in model fitting.  
+
+```{r}
+nzv_train <- nearZeroVar(train_datav3, saveMetrics=TRUE)
+train_datav4 <- train_datav3[, nzv_train$nzv==FALSE]
+Clean_training<-train_datav4
+```
+
+```{r}
+nzv_test <- nearZeroVar(test_datav3, saveMetrics=TRUE)
+test_datav4 <- test_datav3[, nzv_test$nzv==FALSE]
+Clean_testing<-test_datav4
+```
+
+
+###Summary of Data Preprocessing
+
+After 4 stages of data preprocessing, the final training and testing data sets have 53 variables.  
+
+```{r}
+Train_Data<-c("Preprocess 1","Preprocess 2","Preprocess 3", "Preprocess 4")
+Number_of_TrainVar<-c(dim(train_data)[2],dim(train_datav2)[2],dim(train_datav3)[2],dim(train_datav4)[2])
+Test_Data<-c("Preprocess 1","Preprocess 2","Preprocess 3","Preprocess 4")
+Number_of_TestVar<-c(dim(test_data)[2],dim(test_datav2)[2],dim(test_datav3)[2],dim(test_datav4)[2])
+
+data.frame(Train_Data,Number_of_TrainVar)
+data.frame(Test_Data,Number_of_TestVar)
+
+```
+
+
+##Data Partitioning
+
+For the purpose of cross-validation re-sampling methods, we split the cleaned training data set into training set (70%) and validating set (30%).  We shall fit model with training set and validating the fitted model with validating set.
+
+```{r}
+inTrain <- createDataPartition (Clean_training$classe, p=0.7, list=FALSE)
+training <- Clean_training [inTrain ,]
+validating <- Clean_training [- inTrain,]
+```
+
+
+##Model fitting
+
+In this study we attempt to predict the quality of exercise ("classes") using accelerometers motion data.  This is a classification problem and I choose to model it by random forest method. The reasons are: (1) even after data cleaning, we have sufficient amount of variables for random forest to run.  Random forest scale well to large n. (2) Random forest able to automatically select important variables and only variables used in defining splits are in the model.  
+
+I run random forest with 10 folds cross validation, a common choice for the number of folds. In terms of the errors vs number of trees, as shows in following analysis, limits the number of trees to 200 is sufficient.
+
+```{r}
+ctrl <- trainControl(method = "cv", number=10)
+
+rf_fit <- train(classe ~ .,
+             data = training,
+             method = "rf",  
+             trControl = ctrl,
+             allowParallel=TRUE,
+             ntree=200)
+
+print(rf_fit)
+```
+
+In term of accuracy vs number of predictors be considered for each split of tree (mtry), as showed in above analysis, the most accurate value for mtry was 2 with an accuracy of 99.27%. 
+
+```{r}
+plot(rf_fit)
+```
+
+Considering the number of trees vs error, as showed in graph below, 200 is more than sufficient, even if we limit the number of trees to 50 will be sufficient to achieve our goal. 
+
+```{r}
+plot(rf_fit$finalModel)
+```
+
+Because each tree in a random forest uses a different set of variables, it is possible to keep track of which variables seem to be the most consistently influential.  This is captured in the notion of importance.  Here, we see that ¡§roll_belt¡¨ and ¡§yaw_belt¡¨ seem to be influential. 
+
+```{r, fig.height=8, fig.width=12}
+print(plot(varImp(rf_fit)))
+```
+
+
+##Cross-Validation
+
+Let us evaluate the fitted model by validation data set.  We compute the confusion matrix and associated statistics performance of the fitted model below. 
+
+```{r}
+pre_rf <- predict(rf_fit, newdata = validating)
+confusionMatrix(data = pre_rf, validating$classe)
+```
+
+The random forest fitted model predicted with 99.05% accuracy (with 95% confidence interval between 98.77% to 99.28%) in validation data set.  
+ 
+```{r}
+Correctly_Predicted <- pre_rf == validating$classe
+qplot(roll_belt, yaw_belt, data=validating, col=Correctly_Predicted)
+```
+ 
+ 
+##Prediction with testing data
+
+Finally, we apply the testing data set to this random forest fitted model to predict "classe". The predictions are showed below.
+
+```{r}
+Modfit_pred_rf<-predict(rf_fit, Clean_testing)
+Modfit_pred_rf
+```
+ 
+
+##Reference:
+[1] For more information of the data, refer to: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). The training data for this project are available here: [https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv]  The test data are available here: [https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv]  
+
+
+
